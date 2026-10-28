@@ -1,0 +1,6 @@
+2026-10-28 12:00:10.100 [INFO] [auth-service] GET /api/v1/session 200 12.5ms - Active session validated
+2026-10-28 12:00:15.300 [WARN] [auth-service] POST /api/v1/login 401 28.0ms - Invalid password attempt
+2026-10-28 12:00:20.500 [ERROR] [checkout-service] POST /api/v1/checkout 500 450.0ms - Downstream inventory lock timeout
+2026-10-28 12:00:25.000 [INFO] [analytics-worker] Batch metric rollup completed in 1500ms
+MALFORMED TEXT LINE WITHOUT BRACKETS OR TIMESTAMP
+2026-10-28 12:01:00.000 [CRITICAL] [order-db] Database pool connection exhausted

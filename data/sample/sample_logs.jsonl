@@ -1,0 +1,8 @@
+{"timestamp": "2026-10-28T11:00:00Z", "severity": "INFO", "service": "api-gateway", "endpoint": "/healthz", "http_status": 200, "latency_ms": 2.1, "message": "Health check ok"}
+{"timestamp": "2026-10-28T11:00:05Z", "severity": "DEBUG", "service": "api-gateway", "endpoint": "/api/v1/items", "http_status": 200, "latency_ms": 14.8, "message": "Cache hit for items list"}
+{"timestamp": "2026-10-28T11:01:00Z", "severity": "INVALID_SEVERITY", "service": "api-gateway", "endpoint": "/api/v1/items", "http_status": 200, "latency_ms": 10.0, "message": "Record with bad severity"}
+{"timestamp": "2026-10-28T11:02:00Z", "severity": "ERROR", "service": "order-service", "endpoint": "/api/v1/orders", "http_status": 503, "latency_ms": -15.0, "message": "Record with negative latency"}
+{"timestamp": "not-a-valid-timestamp", "severity": "INFO", "service": "order-service", "endpoint": "/api/v1/orders", "http_status": 200, "latency_ms": 50.0, "message": "Record with unparseable timestamp"}
+{MALFORMED_JSON_LINE_WITHOUT_QUOTES
+{"timestamp": "2026-10-28T11:05:00Z", "severity": "INFO", "service": "", "endpoint": "/api/v1/profile", "http_status": 200, "latency_ms": 25.0, "message": "Record with empty service name"}
+{"timestamp": "2026-10-28T11:06:00Z", "severity": "INFO", "service": "user-service", "endpoint": "/api/v1/profile", "http_status": 200, "latency_ms": 22.4, "message": "Profile retrieved for user 102"}

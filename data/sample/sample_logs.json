@@ -1,0 +1,52 @@
+[
+  {
+    "event_id": "evt-0001",
+    "timestamp": "2026-10-28T10:00:00.000Z",
+    "severity": "INFO",
+    "service": "auth-service",
+    "endpoint": "/api/v1/login",
+    "http_status": 200,
+    "latency_ms": 32.5,
+    "message": "User login successful for user_id=4821"
+  },
+  {
+    "event_id": "evt-0002",
+    "timestamp": "2026-10-28T10:01:15.500Z",
+    "severity": "WARN",
+    "service": "billing-service",
+    "endpoint": "/api/v1/invoices",
+    "http_status": 404,
+    "latency_ms": 18.2,
+    "message": "Invoice INV-9821 not found"
+  },
+  {
+    "event_id": "evt-0003",
+    "timestamp": "2026-10-28T10:02:40.000Z",
+    "severity": "ERROR",
+    "service": "payment-service",
+    "endpoint": "/api/v1/charge",
+    "http_status": 500,
+    "latency_ms": 520.4,
+    "message": "Payment gateway timeout for transaction tx_8812"
+  },
+  {
+    "event_id": "evt-0004",
+    "timestamp": "2026-10-28 10:05:00",
+    "severity": "INFO",
+    "service": "notification-service",
+    "endpoint": null,
+    "http_status": null,
+    "latency_ms": null,
+    "message": "Async email digest dispatched to batch queue"
+  },
+  {
+    "event_id": "evt-0005",
+    "timestamp": "2026-10-28T10:10:00.000Z",
+    "severity": "CRITICAL",
+    "service": "database-cluster",
+    "endpoint": null,
+    "http_status": null,
+    "latency_ms": 1250.0,
+    "message": "Replica node lag exceeded 30 seconds threshold"
+  }
+]

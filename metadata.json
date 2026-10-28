@@ -1,0 +1,6 @@
+{
+  "name": "LogAnalyticsPipeline",
+  "description": "Production-grade application log analytics pipeline with ingestion, validation, quarantine, database storage, and summary metrics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
