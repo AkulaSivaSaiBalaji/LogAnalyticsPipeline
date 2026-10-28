@@ -2,7 +2,7 @@
 -- LogAnalyticsPipeline: Data Reconciliation & Quality Verification Queries
 -- =============================================================================
 
-USE log_analytics;
+USE log_analytics_db;
 
 -- 1. Pipeline Run Accounting Reconciliation
 -- Verifies the fundamental invariant: input_count = valid_count + rejected_count + duplicate_count

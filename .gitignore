@@ -4,6 +4,7 @@ build/
 dist/
 coverage/
 .DS_Store
+bun.lock
 
 # Python & Virtual Environments
 .venv/
@@ -25,3 +26,4 @@ output/quarantine/*
 !output/quarantine/.gitkeep
 output/reports/*
 !output/reports/.gitkeep
+data/synthetic/*

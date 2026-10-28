@@ -3,11 +3,11 @@
 -- Charset: utf8mb4 | Collation: utf8mb4_unicode_ci | Storage Engine: InnoDB
 -- =============================================================================
 
-CREATE DATABASE IF NOT EXISTS log_analytics
+CREATE DATABASE IF NOT EXISTS log_analytics_db
     CHARACTER SET utf8mb4
     COLLATE utf8mb4_unicode_ci;
 
-USE log_analytics;
+USE log_analytics_db;
 
 -- -----------------------------------------------------------------------------
 -- 1. pipeline_runs: Execution ledger for auditability, lineage, and reconciliation

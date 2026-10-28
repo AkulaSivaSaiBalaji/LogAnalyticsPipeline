@@ -1,6 +1,14 @@
-"""Log parsers package for LogAnalyticsPipeline.
+"""Log parsers package for LogAnalyticsPipeline."""
 
-Provides specialized parsers for:
-- JSON / JSONL structured logs
-- Text / regex semi-structured application logs
-"""
+from .base import BaseLogParser, RawLogRecord
+from .detector import get_parser_for_file
+from .json_parser import JsonLogParser
+from .text_parser import TextLogParser
+
+__all__ = [
+    "BaseLogParser",
+    "RawLogRecord",
+    "get_parser_for_file",
+    "JsonLogParser",
+    "TextLogParser",
+]

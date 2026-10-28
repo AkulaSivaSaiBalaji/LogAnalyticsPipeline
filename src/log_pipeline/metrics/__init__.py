@@ -1,8 +1,10 @@
-"""Aggregation and summary metrics calculation for LogAnalyticsPipeline.
+"""Aggregation and summary metrics package for LogAnalyticsPipeline."""
 
-Computes:
-- Hourly and service-level event totals
-- Error counts and error rates
-- Latency statistics (mean, p50, p95, p99)
-- Machine-readable CSV output generation
-"""
+from .calculator import MetricsCalculator, is_error_event
+from .reporter import ReportWriter
+
+__all__ = [
+    "MetricsCalculator",
+    "is_error_event",
+    "ReportWriter",
+]

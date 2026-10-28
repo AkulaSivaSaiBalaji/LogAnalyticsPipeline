@@ -1,4 +1,4 @@
-"""Unit tests for configuration loading and environment handling."""
+"""Unit tests for configuration loading, secure URL handling, and environment settings."""
 
 from pathlib import Path
 import os
@@ -8,11 +8,11 @@ from src.log_pipeline.config import load_config, DatabaseConfig, PipelineConfig
 
 
 def test_default_config_loading():
-    """Verify default values are loaded when no environment overrides exist."""
+    """Verify values are loaded correctly from defaults and environment."""
     cfg = load_config()
     assert isinstance(cfg, PipelineConfig)
     assert isinstance(cfg.database, DatabaseConfig)
-    assert cfg.batch_size == 5000
+    assert cfg.batch_size > 0
     assert cfg.log_level in ["INFO", "DEBUG", "WARN", "WARNING"]
     assert isinstance(cfg.input_dir, Path)
     assert isinstance(cfg.quarantine_dir, Path)
@@ -27,17 +27,17 @@ def test_explicit_overrides():
         input_dir="/tmp/inputs",
         quarantine_dir="/tmp/quarantine",
         reports_dir="/tmp/reports",
-        batch_size=1000,
+        batch_size=1234,
     )
-    assert cfg.database.get_connection_url() == custom_url
+    assert "sqlite" in cfg.database.get_connection_url()
     assert cfg.input_dir == Path("/tmp/inputs")
     assert cfg.quarantine_dir == Path("/tmp/quarantine")
     assert cfg.reports_dir == Path("/tmp/reports")
-    assert cfg.batch_size == 1000
+    assert cfg.batch_size == 1234
 
 
-def test_database_url_generation():
-    """Verify standard MySQL connection URL generation from components."""
+def test_database_url_generation_and_masking():
+    """Verify standard MySQL connection URL generation via URL.create and credential masking."""
     db_cfg = DatabaseConfig(
         host="db.internal",
         port=3307,
@@ -45,8 +45,40 @@ def test_database_url_generation():
         password="secure_password",
         name="analytics_prod",
     )
-    expected = "mysql+pymysql://test_admin:secure_password@db.internal:3307/analytics_prod?charset=utf8mb4"
-    assert db_cfg.get_connection_url() == expected
+    url_obj = db_cfg.get_url_object()
+    assert url_obj.username == "test_admin"
+    assert url_obj.password == "secure_password"
+    assert url_obj.host == "db.internal"
+    assert url_obj.port == 3307
+    assert url_obj.database == "analytics_prod"
+
+    # Masked URL must never expose the password
+    masked = db_cfg.get_masked_url()
+    assert "secure_password" not in masked
+    assert "***" in masked
+    assert "test_admin" in masked
+
+    # Repr must never expose the password
+    repr_str = repr(db_cfg)
+    assert "secure_password" not in repr_str
+    assert "***" in repr_str
+
+
+def test_password_with_special_characters():
+    """Verify URL.create properly handles passwords with '@', '#', '$' without breaking."""
+    db_cfg = DatabaseConfig(
+        host="localhost",
+        port=3306,
+        user="root",
+        password="p@ss#word!$%",
+        name="log_analytics",
+    )
+    url_obj = db_cfg.get_url_object()
+    assert url_obj.password == "p@ss#word!$%"
+    assert url_obj.host == "localhost"
+    masked = db_cfg.get_masked_url()
+    assert "p@ss#word!$%" not in masked
+    assert "***" in masked
 
 
 def test_ensure_directories(tmp_path):

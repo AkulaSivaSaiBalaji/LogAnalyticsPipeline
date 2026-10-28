@@ -58,6 +58,10 @@ def normalize_severity(raw_severity: Any) -> CanonicalSeverity:
     """
     if raw_severity is None:
         raise ValueError("Severity is missing or null")
+    if isinstance(raw_severity, CanonicalSeverity):
+        return raw_severity
+    if hasattr(raw_severity, "value"):
+        raw_severity = raw_severity.value
     clean = str(raw_severity).strip().upper()
     if not clean:
         raise ValueError("Severity is empty")
