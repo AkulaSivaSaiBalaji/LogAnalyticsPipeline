@@ -65,6 +65,15 @@ def test_pipeline_run_crud(db_session):
 
 def test_log_event_crud(db_session):
     """Verify inserting and querying LogEventModel rows."""
+    run = PipelineRunModel(
+        run_id="run-test-100",
+        start_time=datetime.now(timezone.utc),
+        status="RUNNING",
+        input_files='["sample.jsonl"]',
+    )
+    db_session.add(run)
+    db_session.commit()
+
     event = LogEventModel(
         event_id="hash-123456",
         run_id="run-test-100",
@@ -90,6 +99,15 @@ def test_log_event_crud(db_session):
 
 def test_rejected_record_crud(db_session):
     """Verify inserting and querying quarantine records."""
+    run = PipelineRunModel(
+        run_id="run-test-100",
+        start_time=datetime.now(timezone.utc),
+        status="RUNNING",
+        input_files='["bad.log"]',
+    )
+    db_session.add(run)
+    db_session.commit()
+
     rejected = RejectedRecordModel(
         run_id="run-test-100",
         source_file="bad.log",

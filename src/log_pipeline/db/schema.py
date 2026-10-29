@@ -14,6 +14,7 @@ from sqlalchemy import (
     Column,
     DateTime,
     Float,
+    ForeignKey,
     Index,
     Integer,
     String,
@@ -58,7 +59,13 @@ class LogEventModel(Base):
     __tablename__ = "log_events"
 
     event_id = Column(String(64), primary_key=True, comment="Deterministic SHA-256 event ID or upstream UUID")
-    run_id = Column(String(64), nullable=False, index=True, comment="Pipeline run that ingested this record")
+    run_id = Column(
+        String(64),
+        ForeignKey("pipeline_runs.run_id"),
+        nullable=False,
+        index=True,
+        comment="Pipeline run that ingested this record",
+    )
     timestamp = Column(DateTime(timezone=True), nullable=False, index=True, comment="Event occurrence time in UTC")
     severity = Column(String(16), nullable=False, index=True, comment="Canonical severity: DEBUG, INFO, WARNING, ERROR, CRITICAL")
     service = Column(String(64), nullable=False, index=True, comment="Originating service identifier")
@@ -83,7 +90,13 @@ class RejectedRecordModel(Base):
     __tablename__ = "rejected_records"
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
-    run_id = Column(String(64), nullable=False, index=True, comment="Pipeline execution ID during quarantine")
+    run_id = Column(
+        String(64),
+        ForeignKey("pipeline_runs.run_id"),
+        nullable=False,
+        index=True,
+        comment="Pipeline execution ID during quarantine",
+    )
     source_file = Column(String(255), nullable=False, comment="Input filename where record originated")
     source_line = Column(Integer, nullable=False, comment="Line number in input file")
     raw_record = Column(Text, nullable=False, comment="Verbatim raw record payload")

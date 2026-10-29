@@ -7,15 +7,30 @@ automated schema bootstrapping, and sanitized credential protection.
 from __future__ import annotations
 
 import logging
+import sqlite3
 from contextlib import contextmanager
 from typing import Generator, Optional, Tuple, Union
-from sqlalchemy import create_engine, Engine, text
+from sqlalchemy import create_engine, Engine, event, text
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.orm import sessionmaker, Session
 from .schema import Base
 from ..config import PipelineConfig, DatabaseConfig, load_config
 
 logger = logging.getLogger("log_pipeline.db")
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_foreign_keys(dbapi_connection, connection_record):
+    """Enable SQLite foreign key enforcement for all SQLite connections.
+
+    SQLite does not enforce foreign keys by default. This hook ensures
+    PRAGMA foreign_keys=ON is executed on every fresh SQLite connection,
+    while safely ignoring non-SQLite connections such as MySQL.
+    """
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 class DatabaseManager:

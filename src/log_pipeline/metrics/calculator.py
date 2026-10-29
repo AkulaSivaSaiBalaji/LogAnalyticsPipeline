@@ -69,6 +69,8 @@ class MetricsCalculator:
             for ev in events
         ]
         df = pd.DataFrame(data)
+        if not df.empty and "event_id" in df.columns:
+            df = df.drop_duplicates(subset=["event_id"], keep="first")
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         return df
 

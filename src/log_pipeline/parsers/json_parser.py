@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Generator
-from .base import BaseLogParser, RawLogRecord
+from typing import Generator, Optional
+from .base import BaseLogParser, RawLogRecord, normalize_source_path
 
 
 class JsonLogParser(BaseLogParser):
@@ -19,8 +19,12 @@ class JsonLogParser(BaseLogParser):
         """
         self.mode = mode
 
-    def parse_file(self, file_path: Path) -> Generator[RawLogRecord, None, None]:
-        filename = file_path.name
+    def parse_file(
+        self,
+        file_path: Path,
+        source_name: Optional[str] = None,
+    ) -> Generator[RawLogRecord, None, None]:
+        filename = source_name or normalize_source_path(file_path)
         if not file_path.exists():
             yield RawLogRecord(
                 source_file=filename,

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 from typing import Any, Dict, Generator, Optional
-from .base import BaseLogParser, RawLogRecord
+from .base import BaseLogParser, RawLogRecord, normalize_source_path
 
 # Primary HTTP access pattern:
 # Example: 2026-10-28 12:00:10.100 [INFO] [auth-service] GET /api/v1/session 200 12.5ms - Active session validated
@@ -15,8 +16,8 @@ HTTP_LOG_PATTERN = re.compile(
     r"\[(?P<service>[^\]]+)\]\s+"
     r"(?:(?P<method>[A-Z]+)\s+)?(?P<endpoint>/\S*)\s+"
     r"(?P<http_status>\d{3})\s+"
-    r"(?P<latency_ms>[\d.]+)ms\s*"
-    r"(?:-\s*|\s+)(?P<message>.*)$",
+    r"(?P<latency_raw>\S+?)ms"
+    r"(?:\s*(?:-\s*|\s+)(?P<message>.*))?$",
     re.IGNORECASE,
 )
 
@@ -32,14 +33,42 @@ GENERAL_LOG_PATTERN = re.compile(
 )
 
 # Optional helper pattern to extract trailing latency like 'in 1500ms' or 'latency: 42ms'
-INLINE_LATENCY_PATTERN = re.compile(r"(?:in|latency[:=]?)\s+([\d.]+)\s*ms\b", re.IGNORECASE)
+INLINE_LATENCY_PATTERN = re.compile(
+    r"(?:\bin\s+|latency\s*[:=]?\s*)([+-]?[0-9A-Za-z.]+)\s*ms\b",
+    re.IGNORECASE,
+)
+
+
+def parse_latency(raw_val: str) -> tuple[Optional[float], Optional[str]]:
+    """Parse and validate raw latency value in milliseconds.
+
+    Returns:
+        (parsed_float, None) if valid nonnegative finite float.
+        (None, error_message) if malformed, negative, or non-finite.
+    """
+    clean_val = raw_val.strip()
+    try:
+        val = float(clean_val)
+    except (ValueError, TypeError):
+        return None, f"MALFORMED_LATENCY: Invalid numeric format '{raw_val}'"
+    if not math.isfinite(val):
+        return None, f"INVALID_LATENCY: Latency must be a finite number, got '{raw_val}'"
+    if val < 0.0:
+        return None, f"NEGATIVE_LATENCY: Latency cannot be negative, got {val}"
+    if val == 0.0:
+        val = 0.0
+    return val, None
 
 
 class TextLogParser(BaseLogParser):
     """Parser for semi-structured text application logs."""
 
-    def parse_file(self, file_path: Path) -> Generator[RawLogRecord, None, None]:
-        filename = file_path.name
+    def parse_file(
+        self,
+        file_path: Path,
+        source_name: Optional[str] = None,
+    ) -> Generator[RawLogRecord, None, None]:
+        filename = source_name or normalize_source_path(file_path)
         if not file_path.exists():
             yield RawLogRecord(
                 source_file=filename,
@@ -69,13 +98,17 @@ class TextLogParser(BaseLogParser):
         m_http = HTTP_LOG_PATTERN.match(line)
         if m_http:
             d = m_http.groupdict()
+            lat_val, lat_err = parse_latency(d["latency_raw"])
+            if lat_err is not None:
+                return None, f"INVALID_LOG_RECORD: {lat_err}"
+
             res: Dict[str, Any] = {
                 "timestamp": d["timestamp"],
                 "severity": d["severity"].strip(),
                 "service": d["service"].strip(),
                 "endpoint": d["endpoint"],
                 "http_status": int(d["http_status"]),
-                "latency_ms": float(d["latency_ms"]),
+                "latency_ms": lat_val,
                 "message": d["message"].strip() if d["message"] else f"{d.get('method') or ''} {d['endpoint']}".strip(),
             }
             return res, None
@@ -88,10 +121,10 @@ class TextLogParser(BaseLogParser):
             latency_ms: Optional[float] = None
             m_lat = INLINE_LATENCY_PATTERN.search(msg)
             if m_lat:
-                try:
-                    latency_ms = float(m_lat.group(1))
-                except ValueError:
-                    pass
+                lat_val, lat_err = parse_latency(m_lat.group(1))
+                if lat_err is not None:
+                    return None, f"INVALID_LOG_RECORD: {lat_err}"
+                latency_ms = lat_val
 
             res = {
                 "timestamp": d["timestamp"],
