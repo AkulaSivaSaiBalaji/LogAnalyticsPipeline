@@ -7,6 +7,7 @@ and pipeline run accounting structures.
 from __future__ import annotations
 
 import hashlib
+import math
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -154,11 +155,12 @@ def generate_deterministic_event_id(
     This guarantees:
     1. Idempotent reprocessing of identical log files without creating duplicate rows.
     2. Legitimate separate events with identical messages (e.g. health checks)
-       occurring on distinct lines or timestamps are NOT collated or dropped.
+       occurring on distinct lines, distinct source paths, or timestamps are NOT collated or dropped.
     """
     ep = endpoint or ""
     ts_iso = timestamp.isoformat()
-    raw_key = f"{source_file}:{source_line}:{service}:{ep}:{ts_iso}:{message}"
+    norm_source = str(source_file).replace("\\", "/").strip()
+    raw_key = f"{norm_source}:{source_line}:{service}:{ep}:{ts_iso}:{message}"
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:32]
 
 
@@ -187,8 +189,11 @@ class LogEventRecord(BaseModel):
     @field_validator("latency_ms")
     @classmethod
     def validate_latency(cls, v: Optional[float]) -> Optional[float]:
-        if v is not None and v < 0.0:
-            raise ValueError(f"Latency cannot be negative, got {v}")
+        if v is not None:
+            if not isinstance(v, (int, float)) or not math.isfinite(v):
+                raise ValueError(f"Latency must be a finite numeric value, got {v}")
+            if v < 0.0:
+                raise ValueError(f"Latency cannot be negative, got {v}")
         return v
 
     @field_validator("service", "message", "source_file")

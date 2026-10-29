@@ -141,6 +141,9 @@ if __name__ == "__main__":
     parser.add_argument("--output-dir", type=str, default="data/synthetic", help="Output directory")
     args = parser.parse_args()
 
+    if args.records <= 0:
+        parser.error(f"--records must be a positive integer (> 0), got: {args.records}")
+
     generated_path = generate_logs(
         num_records=args.records,
         seed=args.seed,

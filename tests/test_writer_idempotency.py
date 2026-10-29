@@ -48,6 +48,7 @@ def test_writer_idempotency_and_duplicates(test_db_manager):
     """Verify that re-inserting identical records does not create duplicates."""
     writer = DatabaseWriter(test_db_manager, batch_size=100)
     run_id = "test-idempotency-run"
+    writer.start_run(run_id, ["auth.log"])
 
     events = [
         LogEventRecord(
@@ -103,6 +104,7 @@ def test_writer_in_batch_duplicates(test_db_manager):
     """Verify multiple occurrences of the same event_id within one batch are counted as duplicates."""
     writer = DatabaseWriter(test_db_manager)
     run_id = "test-inbatch-dupe"
+    writer.start_run(run_id, ["orders.log"])
 
     ev = LogEventRecord(
         event_id="evt-dupe-same",
@@ -124,16 +126,19 @@ def test_writer_in_batch_duplicates(test_db_manager):
 def test_writer_rejected_records(test_db_manager):
     """Verify rejected records batch insertion."""
     writer = DatabaseWriter(test_db_manager)
+    run_id = "run-rej-1"
+    writer.start_run(run_id, ["bad1.jsonl"])
+
     rejections = [
         RejectedRecord(
-            run_id="run-rej-1",
+            run_id=run_id,
             source_file="bad1.jsonl",
             source_line=10,
             raw_record="bad record text 1",
             rejection_reasons=["MALFORMED_JSON_LINE"],
         ),
         RejectedRecord(
-            run_id="run-rej-1",
+            run_id=run_id,
             source_file="bad1.jsonl",
             source_line=15,
             raw_record="bad record text 2",
@@ -162,6 +167,7 @@ def test_writer_mysql_idempotency_live():
     db_mgr.create_tables()
     writer = DatabaseWriter(db_mgr)
     test_run_id = f"mysql-test-{int(datetime.now().timestamp())}"
+    writer.start_run(test_run_id, ["test.log"])
 
     ev = LogEventRecord(
         event_id=f"mysql-evt-{test_run_id}",

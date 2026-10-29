@@ -12,6 +12,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 # Add project root to sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -23,21 +24,33 @@ from src.log_pipeline.pipeline import LogAnalyticsPipeline
 from scripts.generate_synthetic_logs import generate_logs
 
 
-def run_benchmark(records_count: int = 100000, seed: int = 42) -> dict:
+def run_benchmark(
+    records_count: int = 100000,
+    seed: int = 42,
+    database_url: Optional[str] = None,
+    batch_size: int = 5000,
+    data_dir: Optional[str | Path] = None,
+    reports_dir: Optional[str | Path] = None,
+    quarantine_dir: Optional[str | Path] = None,
+) -> dict:
     """Execute performance benchmark on synthetic dataset."""
     print("=" * 75)
     print(f"LogAnalyticsPipeline Benchmark: {records_count:,} Records (Seed: {seed})")
     print("=" * 75)
 
-    data_dir = Path("data/synthetic")
-    input_file = data_dir / f"benchmark_logs_{records_count}.jsonl"
+    dataset_dir = Path(data_dir) if data_dir else Path("data/synthetic")
+    rep_dir = Path(reports_dir) if reports_dir else Path("output/reports")
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+    rep_dir.mkdir(parents=True, exist_ok=True)
+
+    input_file = dataset_dir / f"benchmark_logs_{records_count}.jsonl"
 
     print(f"Generating synthetic dataset with {records_count:,} records...")
     gen_start = time.perf_counter()
     generate_logs(
         num_records=records_count,
         seed=seed,
-        output_dir=data_dir,
+        output_dir=dataset_dir,
         file_prefix="benchmark_logs",
     )
     gen_duration = time.perf_counter() - gen_start
@@ -45,7 +58,7 @@ def run_benchmark(records_count: int = 100000, seed: int = 42) -> dict:
 
     # Test baseline vs optimized batch size
     configs = [
-        {"name": "Optimized Batch (5,000 records/tx)", "batch_size": 5000},
+        {"name": f"Optimized Batch ({batch_size:,} records/tx)", "batch_size": batch_size},
     ]
 
     results = []
@@ -55,7 +68,12 @@ def run_benchmark(records_count: int = 100000, seed: int = 42) -> dict:
         batch_sz = item["batch_size"]
         print(f"\nRunning benchmark: {b_name}...")
 
-        cfg = load_config(batch_size=batch_sz)
+        cfg = load_config(
+            database_url=database_url,
+            batch_size=batch_sz,
+            reports_dir=rep_dir,
+            quarantine_dir=Path(quarantine_dir) if quarantine_dir else None,
+        )
         pipeline = LogAnalyticsPipeline(config=cfg)
 
         run_start = time.perf_counter()
@@ -85,9 +103,7 @@ def run_benchmark(records_count: int = 100000, seed: int = 42) -> dict:
         print(f"  Reconciliation Balanced: {summary['reconciliation_balanced']}")
 
     # Save benchmark summary
-    out_dir = Path("output/reports")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    benchmark_file = out_dir / "benchmark_summary.json"
+    benchmark_file = rep_dir / "benchmark_summary.json"
     with open(benchmark_file, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
@@ -101,6 +117,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Benchmark pipeline throughput.")
     parser.add_argument("--records", type=int, default=100000, help="Number of records to benchmark")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--database-url", type=str, default=None, help="Database connection URL")
+    parser.add_argument("--batch-size", type=int, default=5000, help="Batch size for database insertions")
+    parser.add_argument("--data-dir", type=str, default=None, help="Directory for synthetic benchmark datasets")
+    parser.add_argument("--reports-dir", type=str, default=None, help="Directory for benchmark reports")
+    parser.add_argument("--quarantine-dir", type=str, default=None, help="Directory for quarantined records")
     args = parser.parse_args()
 
-    run_benchmark(records_count=args.records, seed=args.seed)
+    if args.records <= 0:
+        parser.error(f"--records must be a positive integer (> 0), got: {args.records}")
+    if args.batch_size <= 0:
+        parser.error(f"--batch-size must be a positive integer (> 0), got: {args.batch_size}")
+
+    run_benchmark(
+        records_count=args.records,
+        seed=args.seed,
+        database_url=args.database_url,
+        batch_size=args.batch_size,
+        data_dir=args.data_dir,
+        reports_dir=args.reports_dir,
+        quarantine_dir=args.quarantine_dir,
+    )
