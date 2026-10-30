@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS log_events (
     source_line INT UNSIGNED NOT NULL COMMENT '1-based line number in source file',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'Ingestion time in UTC',
     PRIMARY KEY (event_id),
+    CONSTRAINT fk_log_events_run_id FOREIGN KEY (run_id)
+        REFERENCES pipeline_runs (run_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
     INDEX idx_log_events_run_id (run_id),
     INDEX idx_log_events_timestamp (timestamp),
     INDEX idx_log_events_service (service),
@@ -65,6 +69,10 @@ CREATE TABLE IF NOT EXISTS rejected_records (
     rejection_reasons TEXT NOT NULL COMMENT 'JSON array or delimited list of reasons',
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT 'Quarantine timestamp in UTC',
     PRIMARY KEY (id),
+    CONSTRAINT fk_rejected_records_run_id FOREIGN KEY (run_id)
+        REFERENCES pipeline_runs (run_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
     INDEX idx_rejected_run_id (run_id),
     INDEX idx_rejected_source (source_file, source_line)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
