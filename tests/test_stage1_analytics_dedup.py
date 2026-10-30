@@ -330,13 +330,13 @@ def test_writer_db_level_uniqueness_conflict(test_db_manager):
     writer.start_run("run-new", ["new.log"])
     dup_ev = LogEventRecord(
         event_id="evt-conflict-1",
-        timestamp=datetime.now(timezone.utc),
+        timestamp=pre_ev.timestamp,
         severity=CanonicalSeverity.INFO,
         service="api",
         endpoint="/test",
         http_status=200,
         latency_ms=10.0,
-        message="conflict",
+        message="pre-existing",
         source_file="new.log",
         source_line=1,
         run_id="run-new",
@@ -421,7 +421,7 @@ def test_pipeline_reconciliation_with_db_level_conflict(tmp_path):
                 "endpoint": "/login",
                 "http_status": 200,
                 "latency_ms": 10.0,
-                "message": "dupe1",
+                "message": "seed",
             },
             {
                 "event_id": "evt-existing",
@@ -431,7 +431,7 @@ def test_pipeline_reconciliation_with_db_level_conflict(tmp_path):
                 "endpoint": "/login",
                 "http_status": 200,
                 "latency_ms": 10.0,
-                "message": "dupe2",
+                "message": "seed",
             },
             {
                 "event_id": "evt-fresh",

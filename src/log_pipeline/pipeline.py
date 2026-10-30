@@ -44,15 +44,20 @@ class LogAnalyticsPipeline:
         self,
         valid_batch: List[LogEventRecord],
         all_valid_events_for_metrics: List[LogEventRecord],
-    ) -> Tuple[int, int]:
-        """Write buffered valid events and clear the batch buffer."""
+    ) -> Tuple[int, int, int]:
+        """Write buffered valid events and clear the batch buffer.
+
+        Returns:
+            Tuple of (inserted_count, duplicate_count, conflict_count).
+        """
         if not valid_batch:
-            return 0, 0
+            return 0, 0, 0
         write_res = self.writer.write_events_batch(valid_batch)
         ins, dup = write_res
+        conf = write_res.conflict_count
         all_valid_events_for_metrics.extend(write_res.inserted_events)
         valid_batch.clear()
-        return ins, dup
+        return ins, dup, conf
 
     def _flush_rejected_batch(
         self,
@@ -89,6 +94,7 @@ class LogAnalyticsPipeline:
         input_count = 0
         valid_count = 0
         duplicate_count = 0
+        conflict_count = 0
         rejected_count = 0
 
         valid_batch: List[LogEventRecord] = []
@@ -184,11 +190,12 @@ class LogAnalyticsPipeline:
                     if res.is_valid and res.valid_record:
                         valid_batch.append(res.valid_record)
                         if len(valid_batch) >= self.config.batch_size:
-                            ins, dup = self._flush_valid_batch(
+                            ins, dup, conf = self._flush_valid_batch(
                                 valid_batch, all_valid_events_for_metrics
                             )
                             valid_count += ins
                             duplicate_count += dup
+                            conflict_count += conf
                     else:
                         if res.rejected_record:
                             rejected_batch.append(res.rejected_record)
@@ -199,11 +206,12 @@ class LogAnalyticsPipeline:
 
             # Flush final partial batches
             if valid_batch:
-                ins, dup = self._flush_valid_batch(
+                ins, dup, conf = self._flush_valid_batch(
                     valid_batch, all_valid_events_for_metrics
                 )
                 valid_count += ins
                 duplicate_count += dup
+                conflict_count += conf
 
             if rejected_batch:
                 flushed = self._flush_rejected_batch(rejected_batch)
@@ -228,10 +236,11 @@ class LogAnalyticsPipeline:
                 valid_count=valid_count,
                 rejected_count=rejected_count,
                 duplicate_count=duplicate_count,
+                conflict_count=conflict_count,
             )
             recon_csv = reporter.write_reconciliation_report(recon)
 
-            status = "SUCCESS" if rejected_count == 0 else "PARTIAL_SUCCESS"
+            status = "SUCCESS" if (rejected_count == 0 and conflict_count == 0) else "PARTIAL_SUCCESS"
             self.writer.complete_run(
                 run_id=active_run_id,
                 status=status,
@@ -239,6 +248,7 @@ class LogAnalyticsPipeline:
                 valid_count=valid_count,
                 rejected_count=rejected_count,
                 duplicate_count=duplicate_count,
+                conflict_count=conflict_count,
             )
 
             end_time = datetime.now(timezone.utc)
@@ -250,8 +260,10 @@ class LogAnalyticsPipeline:
                 "duration_seconds": duration_sec,
                 "input_count": input_count,
                 "valid_count": valid_count,
+                "inserted_count": valid_count,
                 "rejected_count": rejected_count,
                 "duplicate_count": duplicate_count,
+                "conflict_count": conflict_count,
                 "reconciliation": recon,
                 "quarantine_file": str(quarantine_file) if quarantine_file else None,
                 "hourly_report": str(hourly_csv),
@@ -295,6 +307,7 @@ class LogAnalyticsPipeline:
                     duplicate_count=duplicate_count,
                     failure_details=err_msg,
                     input_files=manifest_requested_files,
+                    conflict_count=conflict_count,
                 )
             except Exception as complete_err:
                 logger.error(

@@ -170,9 +170,10 @@ class MetricsCalculator:
         valid_count: int,
         rejected_count: int,
         duplicate_count: int,
+        conflict_count: int = 0,
     ) -> Dict[str, Any]:
         """Compute data reconciliation invariants and balance status."""
-        accounted_total = valid_count + rejected_count + duplicate_count
+        accounted_total = valid_count + rejected_count + duplicate_count + conflict_count
         discrepancy = input_count - accounted_total
         is_balanced = discrepancy == 0
 
@@ -180,8 +181,10 @@ class MetricsCalculator:
             "run_id": run_id,
             "input_count": input_count,
             "valid_count": valid_count,
+            "inserted_count": valid_count,
             "rejected_count": rejected_count,
             "duplicate_count": duplicate_count,
+            "conflict_count": conflict_count,
             "accounted_total": accounted_total,
             "discrepancy": discrepancy,
             "is_balanced": is_balanced,

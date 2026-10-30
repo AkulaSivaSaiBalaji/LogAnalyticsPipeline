@@ -38,13 +38,14 @@ class ReportWriter:
             "valid_count",
             "rejected_count",
             "duplicate_count",
+            "conflict_count",
             "accounted_total",
             "discrepancy",
             "is_balanced",
             "status",
         ]
         with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             writer.writerow(recon_data)
         return path

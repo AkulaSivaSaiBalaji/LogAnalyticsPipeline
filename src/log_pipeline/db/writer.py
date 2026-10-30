@@ -22,18 +22,24 @@ class BatchWriteResult(tuple):
 
     inserted_count: int
     duplicate_count: int
+    conflict_count: int
     inserted_events: List[LogEventRecord]
+    conflicted_events: List[Tuple[LogEventRecord, str]]
 
     def __new__(
         cls,
         inserted_count: int,
         duplicate_count: int,
         inserted_events: Optional[List[LogEventRecord]] = None,
+        conflict_count: int = 0,
+        conflicted_events: Optional[List[Tuple[LogEventRecord, str]]] = None,
     ):
         instance = super().__new__(cls, (inserted_count, duplicate_count))
         instance.inserted_count = inserted_count
         instance.duplicate_count = duplicate_count
+        instance.conflict_count = conflict_count
         instance.inserted_events = inserted_events if inserted_events is not None else []
+        instance.conflicted_events = conflicted_events if conflicted_events is not None else []
         return instance
 
 
@@ -44,6 +50,55 @@ SQLITE_MAX_VARIABLES_DEFAULT = 32766
 SQLITE_MAX_VARIABLES_LEGACY = 999
 SQLITE_EVENT_ROW_WIDTH = 12
 SQLITE_REJECTED_ROW_WIDTH = 6
+
+
+def _is_payload_identical(ev: LogEventRecord, other: Any) -> bool:
+    """Compare functional event payload fields between a LogEventRecord and another LogEventRecord or LogEventModel.
+
+    Excludes ingestion/lineage metadata (run_id, created_at, source_file, source_line)
+    so identical event payloads occurring across distinct lines or files are correctly recognized as duplicates.
+    """
+    if ev.service != getattr(other, "service", None):
+        return False
+    if ev.endpoint != getattr(other, "endpoint", None):
+        return False
+
+    ev_sev = ev.severity.value if hasattr(ev.severity, "value") else str(ev.severity)
+    other_sev = getattr(other, "severity", None)
+    if hasattr(other_sev, "value"):
+        other_sev = other_sev.value
+    elif other_sev is not None:
+        other_sev = str(other_sev)
+    if ev_sev != other_sev:
+        return False
+
+    if ev.http_status != getattr(other, "http_status", None):
+        return False
+
+    ev_lat = ev.latency_ms
+    other_lat = getattr(other, "latency_ms", None)
+    if (ev_lat is None) != (other_lat is None):
+        return False
+    if ev_lat is not None and other_lat is not None:
+        if abs(float(ev_lat) - float(other_lat)) > 1e-4:
+            return False
+
+    if ev.message != getattr(other, "message", None):
+        return False
+
+    ev_ts = ev.timestamp
+    if ev_ts.tzinfo is None:
+        ev_ts = ev_ts.replace(tzinfo=timezone.utc)
+    other_ts = getattr(other, "timestamp", None)
+    if other_ts is not None:
+        if other_ts.tzinfo is None:
+            other_ts = other_ts.replace(tzinfo=timezone.utc)
+        if abs((ev_ts - other_ts).total_seconds()) > 0.001:
+            return False
+    else:
+        return False
+
+    return True
 
 
 class DatabaseWriter:
@@ -166,14 +221,22 @@ class DatabaseWriter:
             newly persisted.
         """
         if not events:
-            return BatchWriteResult(0, 0, [])
+            return BatchWriteResult(0, 0, [], 0, [])
 
-        # In-batch deduplication by event_id (retain first occurrence)
+        # In-batch deduplication and conflict detection by event_id (retain first occurrence as candidate)
         unique_events: Dict[str, LogEventRecord] = {}
         in_batch_duplicates = 0
+        in_batch_conflicts = 0
+        conflicted_events: List[Tuple[LogEventRecord, str]] = []
+
         for ev in events:
             if ev.event_id in unique_events:
-                in_batch_duplicates += 1
+                existing_ev = unique_events[ev.event_id]
+                if _is_payload_identical(ev, existing_ev):
+                    in_batch_duplicates += 1
+                else:
+                    in_batch_conflicts += 1
+                    conflicted_events.append((ev, "in_batch_conflict"))
             else:
                 unique_events[ev.event_id] = ev
 
@@ -271,13 +334,44 @@ class DatabaseWriter:
                         session.add(LogEventModel(**self._to_row_dict(ev)))
                         actually_inserted_ids.add(ev.event_id)
 
+            # Post-insert classification of uninserted candidate events (duplicates vs conflicts)
+            uninserted_candidate_ids = [eid for eid in candidate_ids if eid not in actually_inserted_ids]
+            db_duplicates = 0
+            db_conflicts = 0
+            if uninserted_candidate_ids:
+                query_chunk_size = min(
+                    self.batch_size,
+                    min(500, self.sqlite_max_variables if self.is_sqlite else 500),
+                )
+                existing_models: Dict[str, LogEventModel] = {}
+                for i in range(0, len(uninserted_candidate_ids), query_chunk_size):
+                    chk_ids = uninserted_candidate_ids[i : i + query_chunk_size]
+                    stmt = select(LogEventModel).where(LogEventModel.event_id.in_(chk_ids))
+                    for model in session.scalars(stmt).all():
+                        existing_models[model.event_id] = model
+
+                for eid in uninserted_candidate_ids:
+                    cand_ev = unique_events[eid]
+                    db_model = existing_models.get(eid)
+                    if db_model is not None and _is_payload_identical(cand_ev, db_model):
+                        db_duplicates += 1
+                    else:
+                        db_conflicts += 1
+                        conflicted_events.append((cand_ev, "db_conflict"))
+
         # Build confirmed inserted_events preserving original candidate order
         inserted_events = [unique_events[eid] for eid in candidate_ids if eid in actually_inserted_ids]
         inserted_count = len(inserted_events)
-        db_duplicates = len(unique_events) - inserted_count
         total_duplicates = in_batch_duplicates + db_duplicates
+        total_conflicts = in_batch_conflicts + db_conflicts
 
-        return BatchWriteResult(inserted_count, total_duplicates, inserted_events)
+        return BatchWriteResult(
+            inserted_count=inserted_count,
+            duplicate_count=total_duplicates,
+            inserted_events=inserted_events,
+            conflict_count=total_conflicts,
+            conflicted_events=conflicted_events,
+        )
 
     def write_rejected_batch(self, rejected_records: List[RejectedRecord]) -> int:
         """Write a batch of rejected records to quarantine table.
@@ -318,6 +412,7 @@ class DatabaseWriter:
         duplicate_count: int,
         failure_details: Optional[str] = None,
         input_files: Optional[List[str]] = None,
+        conflict_count: int = 0,
     ) -> None:
         """Update pipeline run ledger with terminal status and final reconciliation counts."""
         try:

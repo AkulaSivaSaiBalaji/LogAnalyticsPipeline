@@ -103,7 +103,7 @@ def test_in_batch_dedup_across_sqlite_chunks(tmp_path):
 
     # Create 4,000 events. Put identical duplicate ID in chunk 1 (idx 10) and chunk 2 (idx 3500)
     events = [_make_event(run_id, i + 1, event_id=f"ev-{i}") for i in range(4000)]
-    events[3500] = _make_event(run_id, 3501, event_id="ev-10")  # duplicate of index 10
+    events[3500] = _make_event(run_id, 11, event_id="ev-10")  # duplicate of index 10 (idx=11 matches ev-10)
 
     res = writer.write_events_batch(events)
     assert res.inserted_count == 3999

@@ -14,7 +14,7 @@ HTTP_LOG_PATTERN = re.compile(
     r"^(?P<timestamp>\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)\s+"
     r"\[(?P<severity>[^\]]+)\]\s+"
     r"\[(?P<service>[^\]]+)\]\s+"
-    r"(?:(?P<method>[A-Z]+)\s+)?(?P<endpoint>/\S*)\s+"
+    r"(?:(?P<method>GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)\s+)?(?P<endpoint>/\S*)\s+"
     r"(?P<http_status>\d{3})\s+"
     r"(?P<latency_raw>\S+?)ms"
     r"(?:\s*(?:-\s*|\s+)(?P<message>.*))?$",
@@ -30,6 +30,31 @@ GENERAL_LOG_PATTERN = re.compile(
     r"\[(?P<service>[^\]]+)\]\s*"
     r"(?:-\s*|\s+)?(?P<message>.*)$",
     re.IGNORECASE,
+)
+
+# Pattern to detect records that appear to be HTTP access logs but fail strict HTTP parsing,
+# preventing them from silently falling back to the general application parser.
+APPARENT_HTTP_LOG_PATTERN = re.compile(
+    r"""^(?:
+        # 1. Starts with HTTP method (with optional quotes) and an endpoint or path
+        ["']?(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)\b\s*(?:/\S*|https?://\S*)
+        |
+        # 2. Starts with HTTP method and a status code or latency or HTTP protocol
+        ["']?(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)\b\s+(?:\d{2,4}\b|\S+ms\b|HTTP/\d)
+        |
+        # 3. Starts with HTTP method and any token followed by status code, latency, or protocol
+        ["']?(?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|CONNECT|TRACE)\b\s+\S+\s+(?:\d{2,4}\b|\S+ms\b|HTTP/\d)
+        |
+        # 4. Any method-like token + path starting with / + status code or latency
+        [A-Za-z]+\s+/\S+\s+(?:\d{2,4}\b|\S+ms\b|HTTP/\d)
+        |
+        # 5. Starts with an endpoint path followed by status code, latency, or HTTP protocol
+        /\S+\s+(?:\d{2,4}\b|\S+ms\b|HTTP/\d)
+        |
+        # 6. Quoted HTTP request line (e.g. "GET /path HTTP/1.1" ...)
+        ["'][A-Za-z]+\s+/\S*
+    )""",
+    re.IGNORECASE | re.VERBOSE,
 )
 
 # Optional helper pattern to extract trailing latency like 'in 1500ms' or 'latency: 42ms'
@@ -102,12 +127,16 @@ class TextLogParser(BaseLogParser):
             if lat_err is not None:
                 return None, f"INVALID_LOG_RECORD: {lat_err}"
 
+            status_val = int(d["http_status"])
+            if not (100 <= status_val <= 599):
+                return None, f"INVALID_LOG_RECORD: HTTP status code must be between 100 and 599, got {status_val}"
+
             res: Dict[str, Any] = {
                 "timestamp": d["timestamp"],
                 "severity": d["severity"].strip(),
                 "service": d["service"].strip(),
                 "endpoint": d["endpoint"],
-                "http_status": int(d["http_status"]),
+                "http_status": status_val,
                 "latency_ms": lat_val,
                 "message": d["message"].strip() if d["message"] else f"{d.get('method') or ''} {d['endpoint']}".strip(),
             }
@@ -118,6 +147,11 @@ class TextLogParser(BaseLogParser):
         if m_gen:
             d = m_gen.groupdict()
             msg = d["message"].strip()
+
+            # Guard against malformed HTTP logs falling back to general application logs
+            if APPARENT_HTTP_LOG_PATTERN.match(msg):
+                return None, f"MALFORMED_HTTP_LOG: Record appears to be an HTTP access log but does not conform to documented HTTP access format: '{msg}'"
+
             latency_ms: Optional[float] = None
             m_lat = INLINE_LATENCY_PATTERN.search(msg)
             if m_lat:
