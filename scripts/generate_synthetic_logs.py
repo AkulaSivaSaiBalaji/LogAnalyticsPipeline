@@ -9,11 +9,13 @@ malformed syntax, out-of-order timestamps, and boundary validation errors.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any, Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -40,11 +42,52 @@ HTTP_STATUS_WEIGHTS = [
 SEVERITIES = ["INFO", "INFO", "INFO", "WARN", "WARNING", "DEBUG", "ERROR", "CRITICAL"]
 
 
+def generate_synthetic_event_id(
+    seed: int,
+    record_index: int,
+    service: str,
+    endpoint: Optional[str],
+    timestamp_str: str,
+) -> str:
+    """Generate a deterministic 32-character SHA-256 event ID for a synthetic log record."""
+    raw_key = f"synthetic:{seed}:{record_index}:{service}:{endpoint or ''}:{timestamp_str}"
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:32]
+
+
+def create_conflicting_record(
+    base_record: dict[str, Any],
+    message: Optional[str] = None,
+    http_status: Optional[int] = None,
+    severity: Optional[str] = None,
+    latency_ms: Optional[float] = None,
+) -> dict[str, Any]:
+    """Create a conflicting record sharing event_id with base_record but having an altered payload."""
+    conflict = dict(base_record)
+    if message is not None:
+        conflict["message"] = message
+    else:
+        conflict["message"] = f"CONFLICT: altered payload for action {conflict.get('event_id', '')}"
+
+    if http_status is not None:
+        conflict["http_status"] = http_status
+    elif conflict.get("http_status") is not None:
+        conflict["http_status"] = 500 if conflict["http_status"] != 500 else 200
+
+    if severity is not None:
+        conflict["severity"] = severity
+
+    if latency_ms is not None:
+        conflict["latency_ms"] = latency_ms
+
+    return conflict
+
+
 def generate_logs(
     num_records: int = 10000,
     seed: int = 42,
     output_dir: Path = Path("data/synthetic"),
     file_prefix: str = "synthetic_logs",
+    conflict_rate: float = 0.0,
 ) -> Path:
     """Generate reproducible synthetic log datasets."""
     random.seed(seed)
@@ -60,19 +103,26 @@ def generate_logs(
         for i in range(num_records):
             roll = random.random()
 
-            # 1. 5% Intentional Duplicates (exact duplicate of a recent event)
-            if roll < 0.05 and recent_valid_events:
+            # 1. Intentional Conflicts (shares event_id with a recent event but has an altered payload)
+            if conflict_rate > 0.0 and recent_valid_events and roll < conflict_rate:
+                base_event = random.choice(recent_valid_events)
+                conflict_record = create_conflicting_record(base_event)
+                f.write(json.dumps(conflict_record) + "\n")
+                continue
+
+            # 2. 5% Intentional Duplicates (exact duplicate of a recent event)
+            if roll < (0.05 + conflict_rate) and recent_valid_events:
                 dupe = random.choice(recent_valid_events)
                 f.write(json.dumps(dupe) + "\n")
                 continue
 
-            # 2. 3% Malformed JSON Syntax (broken quotes, truncated braces)
-            if roll < 0.08:
+            # 3. 3% Malformed JSON Syntax (broken quotes, truncated braces)
+            if roll < (0.08 + conflict_rate):
                 f.write(f'{{"timestamp": "2026-10-28T10:00:00Z", "service": "auth", "corrupt_line_{i}\n')
                 continue
 
-            # 3. 2% Negative Latency
-            if roll < 0.10:
+            # 4. 2% Negative Latency
+            if roll < (0.10 + conflict_rate):
                 service, endpoints = random.choice(SERVICES)
                 record = {
                     "timestamp": (base_time + timedelta(seconds=i)).isoformat(),
@@ -86,8 +136,8 @@ def generate_logs(
                 f.write(json.dumps(record) + "\n")
                 continue
 
-            # 4. 2% Invalid HTTP status or unparseable timestamp
-            if roll < 0.12:
+            # 5. 2% Invalid HTTP status or unparseable timestamp
+            if roll < (0.12 + conflict_rate):
                 service, endpoints = random.choice(SERVICES)
                 record = {
                     "timestamp": "INVALID_TS_STRING" if random.random() < 0.5 else (base_time + timedelta(seconds=i)).isoformat(),
@@ -101,21 +151,30 @@ def generate_logs(
                 f.write(json.dumps(record) + "\n")
                 continue
 
-            # 5. 2% Out-of-order / Late-arriving timestamps
-            if roll < 0.14:
+            # 6. 2% Out-of-order / Late-arriving timestamps
+            if roll < (0.14 + conflict_rate):
                 offset_seconds = random.randint(-7200, 7200)
                 event_ts = base_time + timedelta(seconds=i + offset_seconds)
             else:
                 event_ts = base_time + timedelta(seconds=i)
 
-            # 6. Standard Valid Event
+            # 7. Standard Valid Event
             service, endpoints = random.choice(SERVICES)
             endpoint = random.choice(endpoints)
             status = random.choices(statuses, weights=weights)[0]
             severity = "ERROR" if status >= 500 else random.choice(SEVERITIES)
             latency = round(random.uniform(2.0, 350.0), 2) if endpoint else None
 
+            event_id = generate_synthetic_event_id(
+                seed=seed,
+                record_index=i,
+                service=service,
+                endpoint=endpoint,
+                timestamp_str=event_ts.isoformat(),
+            )
+
             valid_record = {
+                "event_id": event_id,
                 "timestamp": event_ts.isoformat(),
                 "severity": severity,
                 "service": service,
@@ -139,14 +198,23 @@ if __name__ == "__main__":
     parser.add_argument("--records", type=int, default=10000, help="Number of records to generate")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--output-dir", type=str, default="data/synthetic", help="Output directory")
+    parser.add_argument(
+        "--conflict-rate",
+        type=float,
+        default=0.0,
+        help="Fraction of records to generate as conflicting payload for an existing event_id (default: 0.0)",
+    )
     args = parser.parse_args()
 
     if args.records <= 0:
         parser.error(f"--records must be a positive integer (> 0), got: {args.records}")
+    if args.conflict_rate < 0.0 or args.conflict_rate >= 1.0:
+        parser.error(f"--conflict-rate must be between 0.0 and 1.0, got: {args.conflict_rate}")
 
     generated_path = generate_logs(
         num_records=args.records,
         seed=args.seed,
         output_dir=Path(args.output_dir),
+        conflict_rate=args.conflict_rate,
     )
     print(f"Generated {args.records} synthetic records at {generated_path}")
